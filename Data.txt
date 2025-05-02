@@ -1,0 +1,87 @@
+local ProfileService = require(script:WaitForChild('ProfileService'))
+
+-- template that everyones data is saved as
+local ProfileTemplate = {
+	Cash = 250;
+	Items = {};
+}
+
+--store the profile of all the players that join the game
+local ProfileStore = ProfileService.GetProfileStore(
+	"PlayerData1.0.1",
+	ProfileTemplate
+)
+
+--stores all active profiles in the game
+local Profiles = {}
+
+--allows for the saving of player data
+local function playerAdded(player)
+	--load players saved file
+	local profile = ProfileStore:LoadProfileAsync("Player_" .. player.UserId)
+
+	if profile then 
+		profile:AddUserId(player.UserId)
+		profile:Reconcile()
+
+		--if the player leaves kick them from the active profiles list so there arent duplicates
+		profile:ListenToRelease(function()
+			Profiles[player] = nil
+			player:Kick()
+		end)
+
+		-- checks if they are currently playing
+		if player:IsDescendantOf(game.Players) == true then
+			Profiles[player] = profile
+		else
+			profile:Release()
+		end
+	else
+		player:Kick("Profile not loaded")
+	end
+end
+
+--when a player joins the game
+game.Players.PlayerAdded:Connect(function(player)
+	
+	playerAdded(player)
+	
+	--checks if they exist
+	local profile = Profiles[player]
+	if not profile then warn('No Profile') return end
+	
+	-- initializes the leader stats
+	local folder = Instance.new('Folder')
+	folder.Name = 'leaderstats'
+	folder.Parent = player
+	
+	-- initializes cash
+	local cash = Instance.new('IntValue')
+	cash.Name = 'Cash'
+	cash.Value = profile.Data.Cash or 250
+	cash.Parent = folder
+	
+	--sets saved cash to current cash
+	cash:GetPropertyChangedSignal('Value'):Connect(function()
+		profile.Data.Cash = cash.Value
+	end)
+	
+	game.ServerScriptService:WaitForChild('plot handler'):WaitForChild('CreatePlot'):Fire(player, profile.Data.Items)
+end)
+
+game.Players.PlayerRemoving:Connect(function(player)
+	local profile = Profiles[player]
+	
+	if profile then
+		profile:Release()
+	end
+end)
+
+for _, player in game.Players:GetPlayers() do
+	task.spawn(playerAdded, player)
+end
+
+script:WaitForChild('ItemUnlocked').Event:Connect(function(player, itemId)
+	local profile = Profiles[player]
+	table.insert(profile.Data.Items, itemId)
+end)

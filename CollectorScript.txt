@@ -1,0 +1,17 @@
+--collects the parts dropped from the dropper and adds cash to the player
+script.Parent.Touched:Connect(function(hit)
+	-- makes sure the collector is hit by something that can give you cash
+	if hit:GetAttribute('CashToGive') then
+		local plot = script.Parent.Parent.Parent.Parent
+		local plotOwnerUserId = plot:GetAttribute('Owner')
+		
+		if not plotOwnerUserId then warn('No Plot Owner User Id') return end
+		
+		hit:Destroy()
+		
+		--found player
+		local PlayerObject = game.Players:GetPlayerByUserId(plotOwnerUserId)
+		--adds cash to the player
+		PlayerObject.leaderstats.Cash.Value += hit:GetAttribute('CashToGive')
+	end
+end)

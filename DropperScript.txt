@@ -1,0 +1,10 @@
+--spawn a part every few seconds from the dropper
+local DropperTemplate = game.ServerStorage:WaitForChild('DropperTemplate')
+
+while task.wait(7) do
+	local newDropperPart = DropperTemplate:Clone()
+	-- gets the cframe form the 'drop' part of the dropper
+	newDropperPart.CFrame = script.Parent.Drop.CFrame - Vector3.new(0,1,0)
+	newDropperPart:SetAttribute('CashToGive', script.Parent:GetAttribute('CashPerDrop'))
+	newDropperPart.Parent = script.Parent.DropperParts
+end

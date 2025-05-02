@@ -1,0 +1,263 @@
+local Plots = game.Workspace.plots
+
+local TemplatePlot = game.Workspace.TemplatePlot
+
+
+-- enables the scripts which is disabled by default
+local function enableItemScripts(itemClone)
+	for _, scriptObject in itemClone:GetDescendants() do
+		if scriptObject:IsA('BaseScript') then
+			scriptObject.Enabled = true
+		end
+	end
+end
+
+-- gets the players plot by UserId
+local function getPlot(player)
+	for _, plot in Plots:getChildren() do
+		local owner = plot:GetAttribute('Owner')
+		if not owner then continue end
+		if owner ~= player.UserId then continue end
+		return plot
+	end
+end
+
+
+local function getButtonByIdOfItemToUnlock(player, ItemId)
+	local plot = getPlot(player)
+	if not plot then return end
+	
+	for _, Button in plot.Buttons:GetChildren() do 
+		local IdOfItemToUnlock = Button:GetAttribute('IdOfItemToUnlock')
+		if not IdOfItemToUnlock then continue end
+		
+		if ItemId == IdOfItemToUnlock then
+			return Button
+		end
+	end
+end
+
+-- get the items from the template plot
+local function getItemFromTemplatePlot(itemId)
+	for _, item in TemplatePlot.Items:GetChildren() do
+		if item:GetAttribute('Id') == itemId then
+			return item
+		end
+	end
+end
+
+
+-- loads items from the players data and puts them on the map
+local function loadItems(player, itemIdsTable)
+	local plot = getPlot(player)
+	
+	for _, itemId in itemIdsTable do
+		local item = getItemFromTemplatePlot(itemId)
+		if not item then continue end
+		
+		local itemClone = item:Clone()
+		local itemCFrame
+
+		if itemClone:IsA('Model') then 
+			itemCFrame = itemClone:GetPivot() --model
+		elseif itemClone:IsA('BasePart') then
+			itemCFrame = itemClone.CFrame
+		end
+
+		local relativeItemCFrame = TemplatePlot.CFrame:ToObjectSpace(itemCFrame)
+
+		if itemClone:IsA('Model') then
+			itemClone:PivotTo(plot.CFrame:ToWorldSpace(relativeItemCFrame))
+		elseif itemClone:IsA('BasePart') then
+			itemClone.CFrame = plot.CFrame:ToWorldSpace(relativeItemCFrame)
+		end
+		
+		itemClone.Parent = plot.Items
+		
+		enableItemScripts(itemClone)
+	end
+end
+
+--gives player their plot after data has been loaded
+script:WaitForChild('CreatePlot').Event:Connect(function(player, itemsIdsTable)
+	--get a plot
+	for _, plot in Plots:GetChildren() do
+		if plot:GetAttribute("Taken") then continue end
+		--plot is not taken
+		plot:SetAttribute('Taken', true)
+		plot:SetAttribute('Owner', player.UserId)
+		
+		print('Plot given to ' .. player.name)
+		
+		--creates new ItemsFolder for the player to store the items
+		local ItemsFolder = Instance.new('Folder')
+		ItemsFolder.Name = 'Items'
+		ItemsFolder.Parent = plot
+		
+		--load buttons
+		local TemplateButtons = TemplatePlot.Buttons:Clone()
+		local TemplateItems = TemplatePlot.Items
+		
+		--load the items the player has unlocked
+		loadItems(player, itemsIdsTable)
+		
+		for _, Button in TemplateButtons:GetChildren() do
+			--if item has already been unlock in save file dont load the button by checking the Ids
+			if table.find(itemsIdsTable, Button:GetAttribute('IdOfItemToUnlock')) then continue end
+
+			--get the position of the buttons relative to the template plot
+			--how far away is the button from the center of the template plot
+			local RelativeCFrame = TemplatePlot.CFrame:ToObjectSpace(Button.CFrame)
+			Button.CFrame = plot.CFrame:ToWorldSpace(RelativeCFrame)
+			
+			-- if the button has the hidden attribute then hide it
+			if Button:GetAttribute('Hidden') then
+				Button.Transparency = 1
+				Button.CanCollide = false
+				Button.BillboardGui.Enabled = false
+			end
+			
+			-- sets up the label on top of the buttons
+			Button.BillboardGui.TextLabel.Text = getItemFromTemplatePlot(Button:GetAttribute('IdOfItemToUnlock')).Name .. ' - $' .. Button:GetAttribute('Price') or ""
+			
+			--handles stepping onn the button
+			Button.Touched:Connect(function(hit)
+				if Button:GetAttribute('Hidden') then return end
+				
+				local player = game.Players:GetPlayerFromCharacter(hit.Parent)
+				if not player then return end
+				if plot:GetAttribute('Owner') ~= player.UserId then return end
+				
+				--if button is pressed cant be pressed again by diff body part
+				if Button:GetAttribute('Debounce') then return end
+				
+				Button:SetAttribute('Debounce', true)
+				
+				task.delay(2,function()
+					if Button then
+						Button:SetAttribute('Debounce', false)
+					end
+				end)
+				
+				--gets which item should be unlocked by Id
+				local itemToUnlockId = Button:GetAttribute('IdOfItemToUnlock')
+				if not itemToUnlockId then warn('You forgot to add item to unlock id to button') return end
+				
+				--checks to see if the player can afford the item
+				local Price = Button:GetAttribute('Price')
+				
+				if Price then
+					if player.leaderstats.Cash.Value < Price then
+						warn('You Cannot Afford this Item!')
+						return
+					end
+					--player can afford the item
+					player.leaderstats.Cash.Value -= Price
+				end
+				
+				-- if the button has this attribute this unhides the buttons that appear once bought
+				local ItemIdsToAppearOnceBought = Button:GetAttribute('ItemIdsToAppearOnceBought')
+				
+				if ItemIdsToAppearOnceBought then
+					local ItemIds = string.split(ItemIdsToAppearOnceBought, ',')
+					
+					for _, ItemId in ItemIds do
+						ItemId = tonumber(ItemId)
+						local Button = getButtonByIdOfItemToUnlock(player, ItemId)
+						if not Button then continue end
+						
+						--make visible
+						Button:SetAttribute('Hidden', nil)
+						Button.Transparency = 0
+						Button.CanCollide = true
+						Button.BillboardGui.Enabled = true
+					end
+				end
+				
+				-- gets the item id from the button that was pressed and finds that item in the template plot
+				for _, item in TemplateItems:GetChildren() do
+					if item:GetAttribute('Id') ~= itemToUnlockId then continue end
+					--found correct item
+					--clone it and reposition
+					local itemClone = item:Clone()
+					local itemCFrame
+					
+					-- cframes work differently on models and baseparts
+					if itemClone:IsA('Model') then 
+						itemCFrame = itemClone:GetPivot() --model
+					elseif itemClone:IsA('BasePart') then
+						itemCFrame = itemClone.CFrame
+					end
+					
+					local relativeItemCFrame = TemplatePlot.CFrame:ToObjectSpace(itemCFrame)
+					
+					if itemClone:IsA('Model') then
+						itemClone:PivotTo(plot.CFrame:ToWorldSpace(relativeItemCFrame))
+					elseif itemClone:IsA('BasePart') then
+						itemClone.CFrame = plot.CFrame:ToWorldSpace(relativeItemCFrame)
+					end
+					
+					--adds item to item folder
+					itemClone.Parent = ItemsFolder
+					Button:Destroy()
+					
+					--updates the data script to update that the player unlocked this item
+					game.ServerScriptService.Data.ItemUnlocked:Fire(player, itemToUnlockId)
+					
+					--enables the defaulted disabled scripts 
+					for _, scriptObject in itemClone:GetDescendants() do
+						if scriptObject:IsA('BaseScript') then
+							scriptObject.Enabled = true
+						end
+					end
+					
+				end
+			end)
+			--adds button to button folder
+			Button.Parent = TemplateButtons
+		end
+		
+		--puts the buttons on the plot 
+		TemplateButtons.Parent = plot
+		
+		--makes the buttons visible that appear once other buttons are bought
+		for _, Button in TemplateButtons:GetChildren() do 
+			if table.find(itemsIdsTable, Button:GetAttribute('IdOfItemToUnlock')) then
+				local ItemIdsToAppearOnceBought = Button:GetAttribute('ItemIdsToAppearOnceBought')
+
+				if ItemIdsToAppearOnceBought then
+					local ItemIds = string.split(ItemIdsToAppearOnceBought, ',')
+
+					for _, ItemId in ItemIds do
+						ItemId = tonumber(ItemId)
+						local Button = getButtonByIdOfItemToUnlock(player, ItemId)
+						if not Button then continue end
+
+						--make visible
+						Button:SetAttribute('Hidden', nil)
+						Button.Transparency = 0
+						Button.CanCollide = true
+						Button.BillboardGui.Enabled = true
+					end
+				end
+			end
+		end
+		
+		break
+	end
+end)
+
+--player leaves the game
+game.Players.PlayerRemoving:Connect(function(player)
+	for _, plot in Plots:GetChildren() do
+		if not plot:GetAttribute("Owner") then continue end
+		--the plot is owned by a player
+		if plot:GetAttribute("Owner") ~= player.UserId then continue end
+		-- we have found the correct plot
+		plot:SetAttribute('Taken', nil)
+		plot:SetAttribute('Owner', nil)
+		
+		print('Plot removed from ' .. player.Name)
+		break
+	end
+end)
